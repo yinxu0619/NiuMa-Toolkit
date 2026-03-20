@@ -1,0 +1,41 @@
+{
+  "expo": {
+    "name": "牛马工具箱",
+    "slug": "niuma-toolkit",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "assets/icon.png",
+    "scheme": "niuma-toolkit",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "assets/splash-icon.png",
+      "resizeMode": "cover",
+      "backgroundColor": "#fef3c7"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.niumatoolkit.app"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "assets/adaptive-icon.png",
+        "backgroundColor": "#1e3a5f"
+      },
+      "package": "com.niumatoolkit.app"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font"
+    ],
+    "extra": {
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "17562811-f563-4a1e-8e3b-0ab6b6c1f1b4"
+      }
+    },
+    "owner": "yinxu0619"
+  }
+}
