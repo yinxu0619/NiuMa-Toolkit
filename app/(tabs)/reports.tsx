@@ -28,7 +28,18 @@ const UI = {
 const GRID_GAP = 12;
 const SCREEN_WIDTH = Dimensions.get('window').width;
 import { formatMoney } from '@/lib/format';
-import { loadRecords, getRecordsInRange, clearAllRecords, loadMortgageConfig, getMortgageEnabled, getCommuteMonthlyBudget, loadTimeConfig, deleteRecord } from '@/lib/storage';
+import {
+  loadRecords,
+  getRecordsInRange,
+  clearAllRecords,
+  loadMortgageConfig,
+  getMortgageEnabled,
+  getCommuteMonthlyBudget,
+  loadTimeConfig,
+  deleteRecord,
+  loadFireConfig,
+  loadPersonalConfig,
+} from '@/lib/storage';
 import { formatDuration } from '@/lib/format';
 import { loadSalaryConfig } from '@/lib/storage';
 import { amountToHours, secondWage } from '@/lib/salary';
@@ -36,6 +47,8 @@ import { workedSecondsToday } from '@/lib/workTime';
 import { useSalary } from '@/contexts/SalaryContext';
 import { getMonthlyPayment, getDailyPayment, getRepaymentProgress, type RepaymentProgress } from '@/lib/mortgage';
 import { getTodayRange } from '@/lib/today';
+import { computeFireMetrics, parseSocialAvgAnnual } from '@/lib/fireCalculations';
+import { getFireDailyCosts } from '@/lib/fireDailyCosts';
 import { getUnlockedIds } from '@/lib/achievementUnlock';
 import { ACHIEVEMENT_COUNT } from '@/constants/achievements';
 import { pickBalanceWin, pickBalanceFlat, pickBalanceLose, getReportBalanceCopy, pickYangmaoDeleteCopy } from '@/constants/copy';
@@ -168,6 +181,7 @@ export default function ReportsScreen() {
   const { salaryPerSecond } = useSalary();
   const timeConfigRef = useRef<TimeConfig | null>(null);
   const todayFixedReportRef = useRef(0);
+  const [firePensionPreview, setFirePensionPreview] = useState<number | null>(null);
 
   const fetch = useCallback(async () => {
     const [todayStart, todayEnd] = getTodayRange();
@@ -265,7 +279,9 @@ export default function ReportsScreen() {
     const mortgageOn = await getMortgageEnabled();
     const commuteDay = commuteMon > 0 ? commuteMon / 22 : 0;
     const mortgageDay = mortgageCfg && mortgageOn && isWorkDay(new Date()) ? getDailyPayment(mortgageCfg) : 0;
-    const fixed = commuteDay + mortgageDay;
+    const [fireCfg, personal] = await Promise.all([loadFireConfig(), loadPersonalConfig()]);
+    const { dailySocial, dailyMedical } = getFireDailyCosts(fireCfg, personal?.birthDate ?? null);
+    const fixed = commuteDay + mortgageDay + dailySocial + dailyMedical;
     setTodayFixedReport(fixed);
     todayFixedReportRef.current = fixed;
     const unpaidMonth = monthRecords.filter((r) => r.category === 'unpaid_overtime');
@@ -284,7 +300,13 @@ export default function ReportsScreen() {
     });
     setTodayYangmaoByCat(yangmaoByCat);
     setTodayYangmaoRecords(yangmaoToday.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
-    setReportBalanceCopy(getReportBalanceCopy(workSec * secWage, commuteDay + mortgageDay));
+    setReportBalanceCopy(getReportBalanceCopy(workSec * secWage, fixed));
+
+    if (parseSocialAvgAnnual(fireCfg.socialAvgAnnual) > 0) {
+      setFirePensionPreview(computeFireMetrics(fireCfg, personal?.birthDate ?? null).estimatedMonthlyPension);
+    } else {
+      setFirePensionPreview(null);
+    }
   }, []);
 
   useFocusEffect(
@@ -378,6 +400,14 @@ export default function ReportsScreen() {
         </Text>
         {reportBalanceCopy ? <Text style={styles.balanceCopy}>{reportBalanceCopy}</Text> : null}
       </View>
+
+      {firePensionPreview != null && firePensionPreview > 0 && (
+        <Pressable style={styles.fireCard} onPress={() => router.push('/(tabs)/fire')}>
+          <Text style={styles.fireCardTitle}>FIRE 提前退休</Text>
+          <Text style={styles.fireCardSub}>粗算养老金 {formatMoney(firePensionPreview)}/月 · 与工具箱配置联动</Text>
+          <Text style={styles.fireCardHint}>点击查看 / 调整参数</Text>
+        </Pressable>
+      )}
 
       {/* 今日已薅：可展开 */}
       <Pressable style={styles.dataCard} onPress={() => setShowYangmaoDetail((v) => !v)}>
@@ -604,6 +634,17 @@ const makeStyles = () =>
     balanceValue: { fontSize: 28, fontWeight: '700', color: UI.primary },
     balanceValueDanger: { color: UI.danger },
     balanceCopy: { fontSize: 12, color: UI.secondary, marginTop: 6, fontStyle: 'italic' },
+    fireCard: {
+      backgroundColor: UI.statusCardBg,
+      borderRadius: 12,
+      padding: 16,
+      marginBottom: 12,
+      borderWidth: 1,
+      borderColor: '#FFE0B2',
+    },
+    fireCardTitle: { fontSize: 16, fontWeight: '700', color: UI.cardTitle, marginBottom: 6 },
+    fireCardSub: { fontSize: 14, color: UI.primary, fontWeight: '600' },
+    fireCardHint: { fontSize: 12, color: UI.secondary, marginTop: 8 },
     dataCard: {
       backgroundColor: UI.cardBg,
       borderRadius: 12,

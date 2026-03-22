@@ -8,6 +8,9 @@ const COL = {
   commute: '#FF7A00',
   mortgage: '#FFB366',
   expense: '#E65C00',
+  /** FIRE 页配置的社保/医保日均 */
+  fireSocial: '#FF9F43',
+  fireMedical: '#16A085',
   greenLeft: '#38A169',
   greenRight: '#48BB78',
   red: '#E53E3E',
@@ -22,6 +25,10 @@ const COL = {
 export type IncomeCoverageModuleProps = {
   commute: number;
   mortgage: number;
+  /** FIRE 测算：每日社保成本（无配置时为 0） */
+  fireSocial?: number;
+  /** FIRE 测算：每日医保成本（无配置时为 0） */
+  fireMedical?: number;
   lunch: number;
   expense: number;
   coverageEarned: number;
@@ -35,21 +42,27 @@ export type IncomeCoverageModuleProps = {
   onPressNavigate: () => void;
 };
 
-/** 计算填充在各区间的长度（占目标总额 0~1 比例） */
-function fillParts(
+/** 五段：通勤 | 房贷 | 社保 | 医保 | 午饭+万能 */
+function fillParts5(
   fillRatio: number,
-  c1: number,
-  c2: number
-): { f1: number; f2: number; f3: number } {
-  const f1 = Math.max(0, Math.min(fillRatio, c1));
-  const f2 = Math.max(0, Math.min(fillRatio, c2) - Math.min(fillRatio, c1));
-  const f3 = Math.max(0, fillRatio - Math.min(fillRatio, c2));
-  return { f1, f2, f3 };
+  t1: number,
+  t2: number,
+  t3: number,
+  t4: number
+): { f1: number; f2: number; f3: number; f4: number; f5: number } {
+  const f1 = Math.max(0, Math.min(fillRatio, t1));
+  const f2 = Math.max(0, Math.min(fillRatio, t2) - Math.min(fillRatio, t1));
+  const f3 = Math.max(0, Math.min(fillRatio, t3) - Math.min(fillRatio, t2));
+  const f4 = Math.max(0, Math.min(fillRatio, t4) - Math.min(fillRatio, t3));
+  const f5 = Math.max(0, fillRatio - Math.min(fillRatio, t4));
+  return { f1, f2, f3, f4, f5 };
 }
 
 export function IncomeCoverageModule({
   commute,
   mortgage,
+  fireSocial = 0,
+  fireMedical = 0,
   lunch,
   expense,
   coverageEarned,
@@ -65,23 +78,32 @@ export function IncomeCoverageModule({
   const stampAnimatedForRef = useRef<string | null>(null);
 
   const lunchExpense = lunch + expense;
-  const totalTarget = commute + mortgage + lunchExpense;
+  const totalTarget = commute + mortgage + fireSocial + fireMedical + lunchExpense;
 
-  const { fillRatio, c1, c2 } = useMemo(() => {
+  const { fillRatio, t1, t2, t3, t4 } = useMemo(() => {
     if (totalTarget <= 0) {
-      return { fillRatio: 0, c1: 0, c2: 0 };
+      return { fillRatio: 0, t1: 0, t2: 0, t3: 0, t4: 0 };
     }
     const r = Math.min(1, coverageEarned / totalTarget);
+    const c = commute / totalTarget;
+    const m = mortgage / totalTarget;
+    const fs = fireSocial / totalTarget;
+    const fm = fireMedical / totalTarget;
     return {
       fillRatio: r,
-      c1: commute / totalTarget,
-      c2: (commute + mortgage) / totalTarget,
+      t1: c,
+      t2: c + m,
+      t3: c + m + fs,
+      t4: c + m + fs + fm,
     };
-  }, [totalTarget, coverageEarned, commute, mortgage, lunchExpense]);
+  }, [totalTarget, coverageEarned, commute, mortgage, fireSocial, fireMedical, lunchExpense]);
 
   const covered = isCovered;
 
-  const { f1, f2, f3 } = useMemo(() => fillParts(fillRatio, c1, c2), [fillRatio, c1, c2]);
+  const { f1, f2, f3, f4, f5 } = useMemo(
+    () => fillParts5(fillRatio, t1, t2, t3, t4),
+    [fillRatio, t1, t2, t3, t4]
+  );
 
   useEffect(() => {
     if (!stampText) {
@@ -121,8 +143,6 @@ export function IncomeCoverageModule({
   }
 
   const showSegments = !covered;
-  const line1Left = c1 * 100;
-  const line2Left = c2 * 100;
 
   return (
     <View style={styles.card}>
@@ -177,17 +197,29 @@ export function IncomeCoverageModule({
                       {mortgage > 0 && f2 > 0 && (
                         <View style={{ flex: f2, backgroundColor: COL.mortgage, minWidth: 0 }} />
                       )}
-                      {lunchExpense > 0 && f3 > 0 && (
-                        <View style={{ flex: f3, backgroundColor: COL.expense, minWidth: 0 }} />
+                      {fireSocial > 0 && f3 > 0 && (
+                        <View style={{ flex: f3, backgroundColor: COL.fireSocial, minWidth: 0 }} />
+                      )}
+                      {fireMedical > 0 && f4 > 0 && (
+                        <View style={{ flex: f4, backgroundColor: COL.fireMedical, minWidth: 0 }} />
+                      )}
+                      {lunchExpense > 0 && f5 > 0 && (
+                        <View style={{ flex: f5, backgroundColor: COL.expense, minWidth: 0 }} />
                       )}
                     </View>
                   </View>
                 )}
-                {showSegments && commute > 0 && c1 > 0 && c1 < 1 && (
-                  <View style={[styles.segLine, { left: `${line1Left}%` }]} />
+                {showSegments && commute > 0 && t1 > 0 && t1 < 1 && (
+                  <View style={[styles.segLine, { left: `${t1 * 100}%` }]} />
                 )}
-                {showSegments && mortgage > 0 && c2 > c1 && c2 < 1 && (
-                  <View style={[styles.segLine, { left: `${line2Left}%` }]} />
+                {showSegments && mortgage > 0 && t2 > t1 && t2 < 1 && (
+                  <View style={[styles.segLine, { left: `${t2 * 100}%` }]} />
+                )}
+                {showSegments && fireSocial > 0 && t3 > t2 && t3 < 1 && (
+                  <View style={[styles.segLine, { left: `${t3 * 100}%` }]} />
+                )}
+                {showSegments && fireMedical > 0 && t4 > t3 && t4 < 1 && (
+                  <View style={[styles.segLine, { left: `${t4 * 100}%` }]} />
                 )}
               </>
             )}
@@ -222,6 +254,12 @@ export function IncomeCoverageModule({
             <Text style={styles.modalTitle}>今日需覆盖构成</Text>
             <Text style={styles.modalLine}>通勤 {formatMoney(commute)}</Text>
             <Text style={styles.modalLine}>房贷 {formatMoney(mortgage)}</Text>
+            {fireSocial > 0 ? (
+              <Text style={styles.modalLine}>社保（FIRE）{formatMoney(fireSocial)}</Text>
+            ) : null}
+            {fireMedical > 0 ? (
+              <Text style={styles.modalLine}>医保（FIRE）{formatMoney(fireMedical)}</Text>
+            ) : null}
             <Text style={styles.modalLine}>午饭 {formatMoney(lunch)}</Text>
             <Text style={styles.modalLine}>万能支出 {formatMoney(expense)}</Text>
             <Text style={styles.modalTotal}>合计 {formatMoney(totalTarget)}</Text>

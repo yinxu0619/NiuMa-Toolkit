@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -91,6 +91,8 @@ export default function SettingsScreen() {
   const [niumaEnabled, setNiumaEnabled] = useState(false);
   const [niumaMode, setNiumaMode] = useState<NiumaScheduleMode>('996_sat');
   const [niumaAlternateMonday, setNiumaAlternateMonday] = useState<string | null>(null);
+  /** 避免首屏尚未 load 完就用空生日写库 */
+  const personalHydratedRef = useRef(false);
 
   const loadAll = useCallback(async () => {
     const [t, c, v, p, niuma] = await Promise.all([
@@ -111,6 +113,7 @@ export default function SettingsScreen() {
     setSickTotal(String(v.sickLeaveTotal ?? 0));
     setUnpaidTotal(String(v.unpaidLeaveTotal ?? 0));
     setBirthDate(p?.birthDate ?? '');
+    personalHydratedRef.current = true;
     setNiumaEnabled(niuma.enabled);
     setNiumaMode(niuma.mode);
     setNiumaAlternateMonday(niuma.alternateBigWeekMonday ?? null);
@@ -184,6 +187,15 @@ export default function SettingsScreen() {
     }
     await savePersonalConfig({ birthDate: birthDate.trim(), retireAge: 60 });
   }, [birthDate]);
+
+  /** 生日一改就落库（防抖），FIRE 等页回到前台或聚焦时能读到最新值 */
+  useEffect(() => {
+    if (!personalHydratedRef.current) return;
+    const t = setTimeout(() => {
+      savePersonal();
+    }, 450);
+    return () => clearTimeout(t);
+  }, [birthDate, savePersonal]);
 
   const persistNiuma = useCallback(
     async (next: { enabled: boolean; mode: NiumaScheduleMode; alternateBigWeekMonday: string | null }) => {
@@ -276,7 +288,7 @@ export default function SettingsScreen() {
   const handleClearAll = useCallback(() => {
     Alert.alert(
       '确定清空所有数据？',
-      '此操作不可恢复。将删除：所有记录、房贷、生日、年假/病假、通勤、充电配置、加班状态等。',
+      '此操作不可恢复。将删除：所有记录、房贷、生日、年假/病假、通勤、充电配置、加班状态、FIRE 社保配置、牛马排班等。',
       [
         { text: '取消', style: 'cancel' },
         {

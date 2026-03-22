@@ -81,6 +81,17 @@ export default function MoreScreen() {
         </View>
       </View>
 
+      <Pressable style={styles.fireEntry} onPress={() => router.push('/(tabs)/fire')}>
+        <View style={styles.fireEntryIconWrap} accessibilityLabel="FIRE">
+          <Ionicons name="flame" size={26} color={TOOLBOX_UI.primary} />
+        </View>
+        <View style={styles.fireEntryTextWrap}>
+          <Text style={styles.fireEntryTitle}>FIRE 提前退休</Text>
+          <Text style={styles.fireEntrySub}>社保测算 · 社平手动填，一键联网可选</Text>
+        </View>
+        <Ionicons name="chevron-forward" size={20} color={TOOLBOX_UI.secondary} />
+      </Pressable>
+
       {/* 核心功能：3 列 9 格 */}
       <View style={styles.grid}>
         {GRID_ITEMS.map((item) => (
@@ -130,6 +141,29 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   topCardCalories: { fontSize: 12, color: TOOLBOX_UI.secondary },
+  fireEntry: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: TOOLBOX_UI.topCardBg,
+    borderRadius: TOOLBOX_UI.topCardRadius,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#FFE0B2',
+  },
+  /** 与九宫格一致用矢量图标，避免 emoji/PNG 在部分环境显示为问号 */
+  fireEntryIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 10,
+    backgroundColor: '#FFF0E0',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  fireEntryTextWrap: { flex: 1 },
+  fireEntryTitle: { fontSize: 16, fontWeight: '700', color: TOOLBOX_UI.pageTitle },
+  fireEntrySub: { fontSize: 12, color: TOOLBOX_UI.secondary, marginTop: 4 },
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',

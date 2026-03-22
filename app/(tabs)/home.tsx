@@ -22,7 +22,9 @@ import {
   setOvertimeInProgress as saveOvertimeInProgress,
   clearOvertimeInProgress,
   loadNiumaConfig,
+  loadFireConfig,
 } from '@/lib/storage';
+import { getFireDailyCosts } from '@/lib/fireDailyCosts';
 import { getDailyPayment } from '@/lib/mortgage';
 import { getTodayRange, formatLocalDateKey } from '@/lib/today';
 import { useSalary } from '@/contexts/SalaryContext';
@@ -125,7 +127,12 @@ export default function HomeScreen() {
   const [daySalaryReport, setDaySalaryReport] = useState(0);
   const [salaryMasked, setSalaryMasked] = useState(true); // 时薪、本月收入默认打码，点击显示
   const [todayRecords, setTodayRecords] = useState<RecordEntry[]>([]);
-  const [outcomeBreakdown, setOutcomeBreakdown] = useState({ mortgageDay: 0, commuteDay: 0, lunch: 0, expense: 0 });
+  const [outcomeBreakdown, setOutcomeBreakdown] = useState({
+    mortgageDay: 0,
+    commuteDay: 0,
+    lunch: 0,
+    expense: 0,
+  });
   const [expenseByLabel, setExpenseByLabel] = useState<{ label: string; amount: number }[]>([]);
   const [todayCalories, setTodayCalories] = useState(0);
   const [balanceCopy, setBalanceCopy] = useState('');
@@ -168,12 +175,19 @@ export default function HomeScreen() {
   const [coverGreenCopy, setCoverGreenCopy] = useState(pickCoverageGreenCopy);
   const coverToastFiredRef = useRef(false);
   const prevTodayDataKeyRef = useRef('');
+  /** FIRE 页：每日养老 / 医保成本，计入收入覆盖目标 */
+  const [fireDailySocial, setFireDailySocial] = useState(0);
+  const [fireDailyMedical, setFireDailyMedical] = useState(0);
 
   const fetch = useCallback(async () => {
     const [start, end] = getTodayRange();
     const records = await getRecordsInRange(start, end);
     const salaryConfig = await loadSalaryConfig();
     const personal = await loadPersonalConfig();
+    const fireCfg = await loadFireConfig();
+    const fireDaily = getFireDailyCosts(fireCfg, personal?.birthDate ?? null);
+    setFireDailySocial(fireDaily.dailySocial);
+    setFireDailyMedical(fireDaily.dailyMedical);
     const leaveMarks = await loadLeaveMarks();
     const niuma = await loadNiumaConfig();
     niumaConfigRef.current = niuma;
@@ -246,7 +260,12 @@ export default function HomeScreen() {
         .sort((a, b) => b[1] - a[1])
         .map(([label, amount]) => ({ label, amount }))
     );
-    setOutcomeBreakdown({ mortgageDay, commuteDay: commuteTotal, lunch: lunchToday, expense: expenseToday });
+    setOutcomeBreakdown({
+      mortgageDay,
+      commuteDay: commuteTotal,
+      lunch: lunchToday,
+      expense: expenseToday,
+    });
     setPaidOvertimeToday(paidOvertimeToday);
     setDaySalaryEligible(daySalaryToday > 0);
     setTodayDataKey(todayStr);
@@ -334,7 +353,7 @@ export default function HomeScreen() {
     const mortgage = outcomeBreakdown.mortgageDay;
     const lunch = outcomeBreakdown.lunch;
     const expense = outcomeBreakdown.expense;
-    const target = commute + mortgage + lunch + expense;
+    const target = commute + mortgage + lunch + expense + fireDailySocial + fireDailyMedical;
     if (target <= 0) return;
     const earned = (daySalaryEligible ? earnedByTimeToday : 0) + paidOvertimeToday;
     if (earned >= target) {
@@ -351,7 +370,15 @@ export default function HomeScreen() {
         }
       }
     }
-  }, [outcomeBreakdown, earnedByTimeToday, paidOvertimeToday, daySalaryEligible, toast]);
+  }, [
+    outcomeBreakdown,
+    earnedByTimeToday,
+    paidOvertimeToday,
+    daySalaryEligible,
+    toast,
+    fireDailySocial,
+    fireDailyMedical,
+  ]);
 
   useEffect(() => {
     if (!overtimeInProgress || overtimeStartAt == null) return;
@@ -735,7 +762,8 @@ export default function HomeScreen() {
   const covMortgage = outcomeBreakdown.mortgageDay;
   const covLunch = outcomeBreakdown.lunch;
   const covExpense = outcomeBreakdown.expense;
-  const covTarget = covCommute + covMortgage + covLunch + covExpense;
+  const covTarget =
+    covCommute + covMortgage + covLunch + covExpense + fireDailySocial + fireDailyMedical;
   const coverageEarned = (daySalaryEligible ? earnedByTimeToday : 0) + paidOvertimeToday;
   const coverageCovered = covTarget > 0 && coverageEarned >= covTarget;
 
@@ -976,6 +1004,8 @@ export default function HomeScreen() {
         <IncomeCoverageModule
           commute={covCommute}
           mortgage={covMortgage}
+          fireSocial={fireDailySocial}
+          fireMedical={fireDailyMedical}
           lunch={covLunch}
           expense={covExpense}
           coverageEarned={coverageEarned}

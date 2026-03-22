@@ -133,6 +133,7 @@ export default function TabLayout() {
       <Tabs.Screen name="achievements" options={{ headerShown: false, title: '', ...hideFromTabBar }} />
       <Tabs.Screen name="calendar" options={{ headerShown: false, title: '', ...hideFromTabBar }} />
       <Tabs.Screen name="leave" options={{ headerShown: false, title: '', ...hideFromTabBar }} />
+      <Tabs.Screen name="fire" options={{ headerShown: false, title: '', ...hideFromTabBar }} />
     </Tabs>
   );
 }

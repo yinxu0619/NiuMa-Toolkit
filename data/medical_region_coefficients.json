@@ -1,0 +1,27 @@
+{
+  "北京市|北京市": {
+    "maleRetireYears": 25,
+    "femaleRetireYears": 20,
+    "flexibleMedicalBaseMode": "fixed_100"
+  },
+  "上海市|上海市": {
+    "maleRetireYears": 25,
+    "femaleRetireYears": 20,
+    "flexibleMedicalBaseMode": "range_60_300"
+  },
+  "广东省|广州市": {
+    "maleRetireYears": 30,
+    "femaleRetireYears": 25,
+    "flexibleMedicalBaseMode": "range_60_300"
+  },
+  "广东省|深圳市": {
+    "maleRetireYears": 25,
+    "femaleRetireYears": 22,
+    "flexibleMedicalBaseMode": "range_60_300"
+  },
+  "default": {
+    "maleRetireYears": 25,
+    "femaleRetireYears": 25,
+    "flexibleMedicalBaseMode": "range_60_300"
+  }
+}

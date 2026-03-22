@@ -58,6 +58,60 @@ export interface NiumaConfig {
   alternateBigWeekMonday?: string | null;
 }
 
+/** FIRE 提前退休：社保测算（本地保存） */
+export type FirePaymentType = 'flexible' | 'employee';
+
+/** 医保参保类型 */
+export type FireMedicalInsuranceType = 'employee' | 'resident';
+
+/** 未来分段：每段持续月数 + 该段缴费基数占社平比例（0%=该段停缴） */
+export type FutureContributionSegment = {
+  months: number;
+  baseRatioPercent: number;
+};
+
+export interface FireConfig {
+  /** 已缴年限（年部分） */
+  paidYears: number;
+  /** 已缴年限（月部分 0–11） */
+  paidMonths: number;
+  province: string;
+  city: string;
+  /** 目标退休年龄 50–70 */
+  targetRetireAge: number;
+  paymentType: FirePaymentType;
+  /**
+   * 历史兼容：旧版单一缴费比例；新用户迁移后与 historical/future 对齐。
+   * 新逻辑以 historicalBaseRatioPercent / futureBaseRatioPercent 为准。
+   */
+  baseRatioPercent: number;
+  /** 历史平均缴费基数占社平比例 60%～300%，默认 100%（过去已缴年限的平均） */
+  historicalBaseRatioPercent: number;
+  /** 未来缴费基数占社平比例 0%～300%，默认 60%；0%= 停缴 FIRE（未启用分段时用） */
+  futureBaseRatioPercent: number;
+  /** 启用未来分段后，按各段月数与基数加权计算；关闭时仅用 futureBaseRatioPercent */
+  futureSegmentsEnabled: boolean;
+  /** 未来分段列表；月数不足「距退休月数」时自动补最后一段，超出则截断 */
+  futureSegments: FutureContributionSegment[];
+  /** 当地上年社平工资（元/年），字符串便于输入框空态 */
+  socialAvgAnnual: string;
+  /** 养老金个人账户已累计金额（元），社保 APP 可查，支持小数 */
+  personalAccountBalance: string;
+
+  /** 医保类型：职工 / 城乡居民 */
+  medicalInsuranceType: FireMedicalInsuranceType;
+  /** 已缴医保累计年限（年） */
+  medicalPaidYears: number;
+  /** 已缴医保累计年限（月 0–11） */
+  medicalPaidMonths: number;
+  /** 职工医保退休需缴满年限（年），默认 25；部分城市 30 可手改或联网填入 */
+  medicalRetireRequiredYears: string;
+  /** 城乡居民医保年缴费（元），默认 380 */
+  residentMedicalAnnualYuan: string;
+  /** 医保退休年限核算用性别（男/女各地年限不同） */
+  medicalGender: 'male' | 'female';
+}
+
 // ========== 摸鱼・摸一把（4 种固定） ==========
 
 export type MoyuType = 'toilet' | 'bailan' | 'meeting' | 'daze';
