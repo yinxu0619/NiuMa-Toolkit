@@ -1,5 +1,5 @@
 import { getStorageAdapter } from '@/lib/storageAdapter';
-import type { RecordEntry, SalaryConfig, ChargeConfig, MortgageConfig, TimeConfig, VacationConfig, PersonalConfig } from '@/types';
+import type { RecordEntry, SalaryConfig, ChargeConfig, MortgageConfig, TimeConfig, VacationConfig, PersonalConfig, NiumaConfig } from '@/types';
 import { getDefaultSalaryConfig } from '@/lib/salary';
 
 const KEY_RECORDS = 'dgrtoolbox_records';
@@ -17,6 +17,7 @@ const KEY_MORTGAGE_LAST_DATE = 'dgrtoolbox_mortgage_last_date'; // 上次写入�
 const KEY_COMMUTE_MONTHLY = 'dgrtoolbox_commute_monthly'; // 月度通勤费（元），自动 ÷22 为日均
 const KEY_HOLIDAY_SYNC_ENABLED = 'niuma_holiday_sync_enabled'; // 是否启用联网同步的法定假日表
 const KEY_HOLIDAY_DATES = 'niuma_holiday_dates'; // string[] 休息日 YYYY-MM-DD（含调休后的真实放假）
+const KEY_NIUMA = 'niuma_schedule'; // 996/007 排班
 // ---------- 薪资配置 ----------
 export async function loadSalaryConfig(): Promise<SalaryConfig> {
   try {
@@ -98,6 +99,26 @@ export async function savePersonalConfig(config: PersonalConfig | null): Promise
   const s = getStorageAdapter();
   if (config == null) await s.removeItem(KEY_PERSONAL);
   else await s.setItem(KEY_PERSONAL, JSON.stringify(config));
+}
+
+const DEFAULT_NIUMA: NiumaConfig = {
+  enabled: false,
+  mode: 'standard',
+  alternateBigWeekMonday: null,
+};
+
+export async function loadNiumaConfig(): Promise<NiumaConfig> {
+  try {
+    const raw = await getStorageAdapter().getItem(KEY_NIUMA);
+    if (!raw) return { ...DEFAULT_NIUMA };
+    return { ...DEFAULT_NIUMA, ...JSON.parse(raw) };
+  } catch {
+    return { ...DEFAULT_NIUMA };
+  }
+}
+
+export async function saveNiumaConfig(config: NiumaConfig): Promise<void> {
+  await getStorageAdapter().setItem(KEY_NIUMA, JSON.stringify(config));
 }
 
 // ---------- 假期标记（某日为带薪假/病假）----------
@@ -399,5 +420,6 @@ export async function clearAllData(): Promise<void> {
   await s.removeItem(KEY_COMMUTE_MONTHLY);
   await s.removeItem(KEY_PAYDAY);
   await s.removeItem(KEY_CHARGE);
+  await s.removeItem(KEY_NIUMA);
   await clearOvertimeInProgress();
 }

@@ -39,6 +39,25 @@ export interface PersonalConfig {
   retireAge?: number; // 退休年龄，默认 60
 }
 
+/** 996/007 牛马排班（设置里开启后影响「今日」周末判定、下一工作日等） */
+export type NiumaScheduleMode =
+  | 'standard'
+  | '996_sat'
+  | '996_sun'
+  | 'alternate_weeks'
+  | 'all_week';
+
+export interface NiumaConfig {
+  /** 关闭则按标准双休（周六日休息） */
+  enabled: boolean;
+  mode: NiumaScheduleMode;
+  /**
+   * 大小周：某个「大周」的周一 YYYY-MM-DD（该周周六需上班）。
+   * 与当前周周一相差偶数个自然周 → 大周；奇数 → 小周（双休）。
+   */
+  alternateBigWeekMonday?: string | null;
+}
+
 // ========== 摸鱼・摸一把（4 种固定） ==========
 
 export type MoyuType = 'toilet' | 'bailan' | 'meeting' | 'daze';

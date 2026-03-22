@@ -84,6 +84,42 @@ export function pickYangmaoDeleteCopy(): string {
   ]);
 }
 
+/** 设置里开启「996/007 牛马」时的弹窗 */
+export function pickNuclearNiumaEnable(): { title: string; message: string } {
+  return pick([
+    {
+      title: '核动力牛马模式',
+      message: '反应堆点火成功。月薪仍按计薪天数摊，但「周末 / 下一工作日」跟你的排班走，卷王请选对档位。',
+    },
+    {
+      title: '⚠️ 核动力已并网',
+      message: '检测到高强度牛马。排班一保存，今日页就按你的班表算休息还是上班～',
+    },
+    {
+      title: '007 预备役',
+      message: '老板看了都流泪。选好 996/大小周/全勤，咱们按表办事。',
+    },
+    {
+      title: '卷王认证',
+      message: '双休？那是什么。选排班吧，系统给你算下一班几时上。',
+    },
+  ]);
+}
+
+/** 纯周末（非法定假、无年假病假）：首页状态卡主文案——月薪÷22 不算双休，不展示「今日已薅」 */
+export function pickWeekendEarnedLabel(): string {
+  return pick([
+    '双休不算发薪日',
+    '月薪÷22，周末别碰瓷',
+    '今天没有 b 班费',
+    '躺平，工资工作日再算',
+    '周末白嫖自己的命，不算钱',
+    '双休是法定的，日薪不是按天发',
+    '牛马周末关机，工资条周一见',
+    '今日零元购·班',
+  ]);
+}
+
 /** 今日病假：首页「爽摸」卡主标题（病假不算薅老板，算养伤回血） */
 export function pickSickLeaveShuangmoTitle(): string {
   return pick([

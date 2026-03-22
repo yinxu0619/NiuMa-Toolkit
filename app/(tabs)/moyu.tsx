@@ -17,8 +17,9 @@ import {
 import Constants from 'expo-constants';
 import { useFocusEffect } from '@react-navigation/native';
 import { formatMoney, formatDurationHHMMSSWithMs, formatDuration } from '@/lib/format';
-import { addRecord, loadTimeConfig } from '@/lib/storage';
+import { addRecord, loadTimeConfig, loadLeaveMarks, getHolidaySyncEnabled, loadHolidayDates, loadNiumaConfig } from '@/lib/storage';
 import { getCurrentPeriod } from '@/lib/workTime';
+import { isRestDay } from '@/lib/holidays';
 import { useSalary } from '@/contexts/SalaryContext';
 import { useToast } from '@/contexts/ToastContext';
 import { MOYU_TYPE_LABELS, type MoyuType } from '@/types';
@@ -466,7 +467,8 @@ export default function MoyuScreen() {
 
   const startMsRef = useRef(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const periodAtStartRef = useRef<'working' | 'lunch' | 'after_work' | 'before_work'>('working');
+  /** 开局时是否按带薪计（周末/法定假/请假 = 否） */
+  const paidAtStartRef = useRef(false);
   /** 点击猫爪：快速摇一下（替代按下缩小） */
   const pawTapRock = useRef(new Animated.Value(0)).current;
   /** 与弹出金额同频：左-右摇摆（仅带薪计时中） */
@@ -476,10 +478,19 @@ export default function MoyuScreen() {
   const coinAnims = useRef([...Array(4)].map(() => new Animated.Value(0))).current;
 
   const [period, setPeriod] = useState<'working' | 'lunch' | 'after_work' | 'before_work'>('working');
+  /** 周末 / 法定休 / 年假病假：不按工作日带薪摸鱼 */
+  const [isRestDayState, setIsRestDayState] = useState(false);
 
   const loadPeriod = useCallback(async () => {
     const time = await loadTimeConfig();
     if (time) setPeriod(getCurrentPeriod(time));
+    const [marks, holOn, dates, niuma] = await Promise.all([
+      loadLeaveMarks(),
+      getHolidaySyncEnabled(),
+      loadHolidayDates(),
+      loadNiumaConfig(),
+    ]);
+    setIsRestDayState(isRestDay(new Date(), holOn, holOn ? dates : [], marks, niuma));
   }, []);
 
   useFocusEffect(
@@ -492,7 +503,7 @@ export default function MoyuScreen() {
     return () => clearInterval(t);
   }, [loadPeriod]);
 
-  const isPaid = period === 'working';
+  const isPaid = running ? isPaidSession : period === 'working' && !isRestDayState;
   const displayEarned = isPaid ? earnedBySecond(elapsedMs, salaryPerSecond) : 0;
 
   const elapsedDisplayMs = running ? elapsedMs : showFrozenStats ? frozenElapsedMs : 0;
@@ -705,10 +716,18 @@ export default function MoyuScreen() {
       return;
     }
     const time = await loadTimeConfig();
+    const [marks, holOn, dates, niuma] = await Promise.all([
+      loadLeaveMarks(),
+      getHolidaySyncEnabled(),
+      loadHolidayDates(),
+      loadNiumaConfig(),
+    ]);
+    const rest = isRestDay(new Date(), holOn, holOn ? dates : [], marks, niuma);
     const p = time ? getCurrentPeriod(time) : 'working';
-    periodAtStartRef.current = p;
-    setIsPaidSession(p === 'working');
-    if (p === 'lunch' || p === 'after_work') toast.show('现在摸鱼白摸哦～');
+    const paid = p === 'working' && !rest;
+    paidAtStartRef.current = paid;
+    setIsPaidSession(paid);
+    if (p === 'lunch' || p === 'after_work' || rest) toast.show('现在摸鱼白摸哦～');
     lastIntegerYuanEmittedRef.current = 0;
     setBubbles([]);
     setTapPops([]);
@@ -722,7 +741,7 @@ export default function MoyuScreen() {
   const handleEnd = async () => {
     if (!running) return;
     const endElapsed = elapsedMs;
-    const wasPaid = periodAtStartRef.current === 'working';
+    const wasPaid = paidAtStartRef.current;
     const earned = wasPaid ? earnedBySecond(endElapsed, salaryPerSecond) : 0;
     setFrozenElapsedMs(endElapsed);
     setFrozenEarned(earned);

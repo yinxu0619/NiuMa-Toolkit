@@ -3,6 +3,9 @@
  */
 
 import { loadHolidayDates, saveHolidayDates, setHolidaySyncEnabled } from '@/lib/storage';
+import { formatLocalDateKey } from '@/lib/today';
+import type { NiumaConfig } from '@/types';
+import { isNiumaRestDay, isWorkdayForNextStart } from '@/lib/niumaSchedule';
 
 interface HolidayItem {
   name: string;
@@ -199,6 +202,28 @@ export function isTodayHoliday(storedDates: string[]): boolean {
   return storedDates.length > 0 && storedDates.includes(today);
 }
 
+/**
+ * 今日是否「不用按工作日打卡」：周末（或牛马排班下的休息日）、法定休息日（已同步）、日历年假/病假。
+ * 注：未同步假日表时仅周末+请假；补班周末需精确日历，当前按周末一律休息。
+ */
+export function isRestDay(
+  d: Date,
+  holidaySyncEnabled: boolean,
+  holidayDates: string[],
+  leaveMarks: Record<string, string | undefined>,
+  niuma?: NiumaConfig | null
+): boolean {
+  const key = formatLocalDateKey(d);
+  if (holidaySyncEnabled && holidayDates.length > 0 && holidayDates.includes(key)) return true;
+  const lm = leaveMarks[key];
+  if (lm === 'annual_leave' || lm === 'sick_leave') return true;
+  if (niuma?.enabled) {
+    return isNiumaRestDay(d, niuma);
+  }
+  const wd = d.getDay();
+  return wd === 0 || wd === 6;
+}
+
 export function getNextHolidayFromStored(storedDates: string[]): { name: string; daysLeft: number } | null {
   const d = new Date();
   const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -210,7 +235,15 @@ export function getNextHolidayFromStored(storedDates: string[]): { name: string;
   return { name: next === today ? '今日' : '下一休息日', daysLeft };
 }
 
-export function getNextWorkdayStart(workStart: string, holidayDates: string[]): Date {
+/**
+ * 下一个「工作日」的上班时刻（本地时区）。从明天起找，跳过周末、法定休息日、年假/病假标记日。
+ */
+export function getNextWorkdayStart(
+  workStart: string,
+  holidayDates: string[],
+  leaveMarks?: Record<string, string | undefined>,
+  niuma?: NiumaConfig | null
+): Date {
   const [h, m] = workStart.split(':').map(Number);
   const hour = isNaN(h) ? 9 : h;
   const min = isNaN(m) ? 0 : m;
@@ -218,10 +251,7 @@ export function getNextWorkdayStart(workStart: string, holidayDates: string[]): 
   for (let offset = 1; offset <= 366; offset++) {
     const d = new Date(now);
     d.setDate(d.getDate() + offset);
-    const day = d.getDay();
-    if (day === 0 || day === 6) continue;
-    const str = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    if (holidayDates.includes(str)) continue;
+    if (!isWorkdayForNextStart(d, holidayDates, leaveMarks, niuma)) continue;
     d.setHours(hour, min, 0, 0);
     return d;
   }

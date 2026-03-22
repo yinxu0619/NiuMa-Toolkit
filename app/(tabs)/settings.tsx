@@ -29,6 +29,8 @@ import {
   saveVacationConfig,
   loadPersonalConfig,
   savePersonalConfig,
+  loadNiumaConfig,
+  saveNiumaConfig,
   saveHolidayDates,
   setHolidayLastSyncAt,
   setHolidaySyncEnabled,
@@ -40,6 +42,10 @@ import { useSalary } from '@/contexts/SalaryContext';
 import { useToast } from '@/contexts/ToastContext';
 import { DEFAULT_WORK_DAYS } from '@/constants/theme';
 import { formatMoney, formatHoursToChinese } from '@/lib/format';
+import { mondayOfWeek } from '@/lib/niumaSchedule';
+import { formatLocalDateKey } from '@/lib/today';
+import type { NiumaScheduleMode } from '@/types';
+import { pickNuclearNiumaEnable } from '@/constants/copy';
 
 const SETTINGS_UI = {
   bg: '#FFFFFF',
@@ -55,6 +61,13 @@ const SETTINGS_UI = {
   padding: 16,
   gap: 12,
 } as const;
+
+const NIUMA_MODE_ROWS: { mode: NiumaScheduleMode; title: string; subtitle: string }[] = [
+  { mode: '996_sat', title: '996 · 周六上班', subtitle: '周一～周六，周日休' },
+  { mode: '996_sun', title: '996 · 周日上班', subtitle: '周一～周五 + 周日，周六休' },
+  { mode: 'alternate_weeks', title: '大小周', subtitle: '大周周六上班，小周双休' },
+  { mode: 'all_week', title: '007 · 一周七天', subtitle: '无休（法定假日仍按同步表）' },
+];
 
 export default function SettingsScreen() {
   const { config, refresh, setConfig } = useSalary();
@@ -75,13 +88,17 @@ export default function SettingsScreen() {
   const [holidaySyncing, setHolidaySyncing] = useState(false);
   const [showAboutModal, setShowAboutModal] = useState(false);
   const [focusedField, setFocusedField] = useState<string | null>(null);
+  const [niumaEnabled, setNiumaEnabled] = useState(false);
+  const [niumaMode, setNiumaMode] = useState<NiumaScheduleMode>('996_sat');
+  const [niumaAlternateMonday, setNiumaAlternateMonday] = useState<string | null>(null);
 
   const loadAll = useCallback(async () => {
-    const [t, c, v, p] = await Promise.all([
+    const [t, c, v, p, niuma] = await Promise.all([
       loadTimeConfig(),
       loadSalaryConfig(),
       loadVacationConfig(),
       loadPersonalConfig(),
+      loadNiumaConfig(),
     ]);
     setWorkStart(t.workStart);
     setWorkEnd(t.workEnd);
@@ -94,6 +111,9 @@ export default function SettingsScreen() {
     setSickTotal(String(v.sickLeaveTotal ?? 0));
     setUnpaidTotal(String(v.unpaidLeaveTotal ?? 0));
     setBirthDate(p?.birthDate ?? '');
+    setNiumaEnabled(niuma.enabled);
+    setNiumaMode(niuma.mode);
+    setNiumaAlternateMonday(niuma.alternateBigWeekMonday ?? null);
   }, []);
 
   useFocusEffect(
@@ -164,6 +184,71 @@ export default function SettingsScreen() {
     }
     await savePersonalConfig({ birthDate: birthDate.trim(), retireAge: 60 });
   }, [birthDate]);
+
+  const persistNiuma = useCallback(
+    async (next: { enabled: boolean; mode: NiumaScheduleMode; alternateBigWeekMonday: string | null }) => {
+      await saveNiumaConfig({
+        enabled: next.enabled,
+        mode: next.mode,
+        alternateBigWeekMonday: next.mode === 'alternate_weeks' ? next.alternateBigWeekMonday : null,
+      });
+    },
+    []
+  );
+
+  const onNiumaToggle = useCallback(
+    async (enabled: boolean) => {
+      if (enabled) {
+        const { title, message } = pickNuclearNiumaEnable();
+        Alert.alert(title, message);
+        let m = niumaMode;
+        let alt = niumaAlternateMonday;
+        if (m === 'standard') m = '996_sat';
+        if (m === 'alternate_weeks' && !alt) {
+          alt = formatLocalDateKey(mondayOfWeek(new Date()));
+          setNiumaAlternateMonday(alt);
+        }
+        setNiumaEnabled(true);
+        setNiumaMode(m);
+        await persistNiuma({ enabled: true, mode: m, alternateBigWeekMonday: alt });
+      } else {
+        setNiumaEnabled(false);
+        await persistNiuma({ enabled: false, mode: niumaMode, alternateBigWeekMonday: niumaAlternateMonday });
+      }
+    },
+    [niumaMode, niumaAlternateMonday, persistNiuma]
+  );
+
+  const onSelectNiumaMode = useCallback(
+    async (mode: NiumaScheduleMode) => {
+      let alt: string | null = niumaAlternateMonday;
+      if (mode === 'alternate_weeks' && !alt) {
+        alt = formatLocalDateKey(mondayOfWeek(new Date()));
+      }
+      if (mode !== 'alternate_weeks') alt = null;
+      setNiumaMode(mode);
+      setNiumaAlternateMonday(alt);
+      if (niumaEnabled) {
+        await persistNiuma({ enabled: true, mode, alternateBigWeekMonday: alt });
+      }
+    },
+    [niumaEnabled, niumaAlternateMonday, persistNiuma]
+  );
+
+  const onMarkBigWeek = useCallback(async () => {
+    const m = mondayOfWeek(new Date());
+    const key = formatLocalDateKey(m);
+    setNiumaAlternateMonday(key);
+    if (niumaEnabled) await persistNiuma({ enabled: true, mode: 'alternate_weeks', alternateBigWeekMonday: key });
+  }, [niumaEnabled, persistNiuma]);
+
+  const onMarkSmallWeek = useCallback(async () => {
+    const m = mondayOfWeek(new Date());
+    m.setDate(m.getDate() - 7);
+    const key = formatLocalDateKey(m);
+    setNiumaAlternateMonday(key);
+    if (niumaEnabled) await persistNiuma({ enabled: true, mode: 'alternate_weeks', alternateBigWeekMonday: key });
+  }, [niumaEnabled, persistNiuma]);
 
   // ---------- 同步节假日 ----------
   const handleHolidaySync = useCallback(async () => {
@@ -412,7 +497,72 @@ export default function SettingsScreen() {
         <Text style={styles.footHint}>用于计算退休倒计时（默认60岁，你说65？你现在还干得动么？）</Text>
       </View>
 
-      {/* 5. 外观与假日 */}
+      {/* 5. 996 / 007 牛马排班 */}
+      <View style={{ ...styles.card, backgroundColor: SETTINGS_UI.topCardBg, borderColor: 'transparent' }}>
+        <Text style={styles.groupTitle}>996 / 007 牛马排班</Text>
+        <Text style={styles.hint}>
+          关闭时按标准双休（周一～周五上班）。开启后「今日」休息/上班、下一工作日倒计时跟排班走。
+        </Text>
+        <View style={styles.switchRow}>
+          <View style={{ flex: 1, paddingRight: 8 }}>
+            <Text style={styles.switchLabel}>核动力牛马模式</Text>
+            <Text style={styles.niumaSubHint}>卷王请选对档位</Text>
+          </View>
+          <Switch
+            value={niumaEnabled}
+            onValueChange={onNiumaToggle}
+            trackColor={{ false: SETTINGS_UI.border, true: SETTINGS_UI.primary }}
+            thumbColor="#fff"
+          />
+        </View>
+        {niumaEnabled ? (
+          <>
+            <Text style={[styles.label, { marginTop: 12 }]}>排班方式</Text>
+            {NIUMA_MODE_ROWS.map((row) => {
+              const active = niumaMode === row.mode;
+              return (
+                <Pressable
+                  key={row.mode}
+                  style={[styles.niumaModeRow, active && styles.niumaModeRowActive]}
+                  onPress={() => onSelectNiumaMode(row.mode)}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.niumaModeTitle, active && styles.niumaModeTitleActive]}>{row.title}</Text>
+                    <Text style={styles.niumaModeSub}>{row.subtitle}</Text>
+                  </View>
+                  {active ? (
+                    <Ionicons name="checkmark-circle" size={22} color={SETTINGS_UI.primary} />
+                  ) : (
+                    <Ionicons name="ellipse-outline" size={22} color={SETTINGS_UI.border} />
+                  )}
+                </Pressable>
+              );
+            })}
+            {niumaMode === 'alternate_weeks' ? (
+              <View style={styles.niumaAlternateBlock}>
+                <Text style={styles.footHint}>
+                  与「大周」周一相差偶数周 → 大周（周六上班）；奇数周 → 小周。不对时点下面校准：
+                </Text>
+                <View style={styles.niumaCalRow}>
+                  <Pressable style={styles.niumaCalBtn} onPress={onMarkBigWeek}>
+                    <Text style={styles.niumaCalBtnText}>本周大周</Text>
+                  </Pressable>
+                  <Pressable style={styles.niumaCalBtn} onPress={onMarkSmallWeek}>
+                    <Text style={styles.niumaCalBtnText}>本周小周</Text>
+                  </Pressable>
+                </View>
+                {niumaAlternateMonday ? (
+                  <Text style={styles.niumaAnchorHint}>锚点：{niumaAlternateMonday}（大周周一）</Text>
+                ) : null}
+              </View>
+            ) : null}
+          </>
+        ) : (
+          <Text style={styles.footHint}>关掉就是普通双休，周末不碰瓷日薪～</Text>
+        )}
+      </View>
+
+      {/* 6. 外观与假日 */}
       <View style={styles.card}>
         <Text style={styles.groupTitle}>假日</Text>
         <Pressable
@@ -429,7 +579,7 @@ export default function SettingsScreen() {
         </Text>
       </View>
 
-      {/* 6. 数据与关于 */}
+      {/* 7. 数据与关于 */}
       <View style={styles.card}>
         <Text style={styles.groupTitle}>数据与关于</Text>
         <Pressable style={styles.row} onPress={handleExport}>
@@ -580,4 +730,35 @@ const styles = StyleSheet.create({
   modalBtnText: { fontSize: 14, fontWeight: '600', color: SETTINGS_UI.primary },
   modalClose: { marginTop: 8, paddingVertical: 8, alignItems: 'center' },
   modalCloseText: { fontSize: 14, color: SETTINGS_UI.textSecondary },
+  niumaSubHint: { fontSize: 11, color: SETTINGS_UI.textSecondary, marginTop: 2 },
+  niumaModeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    marginBottom: 8,
+    borderRadius: SETTINGS_UI.radiusInput,
+    borderWidth: 1,
+    borderColor: SETTINGS_UI.border,
+    backgroundColor: SETTINGS_UI.cardBg,
+  },
+  niumaModeRowActive: {
+    borderColor: SETTINGS_UI.primary,
+    backgroundColor: '#FFF5EB',
+  },
+  niumaModeTitle: { fontSize: 14, fontWeight: '600', color: SETTINGS_UI.text },
+  niumaModeTitleActive: { color: SETTINGS_UI.primary },
+  niumaModeSub: { fontSize: 12, color: SETTINGS_UI.textSecondary, marginTop: 4 },
+  niumaAlternateBlock: { marginTop: 8 },
+  niumaCalRow: { flexDirection: 'row', gap: 10, marginTop: 10 },
+  niumaCalBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: SETTINGS_UI.radiusInput,
+    borderWidth: 1,
+    borderColor: SETTINGS_UI.primary,
+    alignItems: 'center',
+  },
+  niumaCalBtnText: { fontSize: 13, fontWeight: '600', color: SETTINGS_UI.primary },
+  niumaAnchorHint: { fontSize: 11, color: SETTINGS_UI.textSecondary, marginTop: 8 },
 });

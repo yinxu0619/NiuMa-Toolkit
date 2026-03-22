@@ -1,4 +1,4 @@
-import React, { useCallback, useState, useEffect, useRef } from 'react';
+import React, { useCallback, useState, useEffect, useRef, useMemo } from 'react';
 import { View, Text, TextInput, StyleSheet, ScrollView, RefreshControl, Pressable, Modal, Alert, Vibration, Animated, Platform } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import Constants from 'expo-constants';
@@ -21,6 +21,7 @@ import {
   getOvertimeInProgress,
   setOvertimeInProgress as saveOvertimeInProgress,
   clearOvertimeInProgress,
+  loadNiumaConfig,
 } from '@/lib/storage';
 import { getDailyPayment } from '@/lib/mortgage';
 import { getTodayRange, formatLocalDateKey } from '@/lib/today';
@@ -35,10 +36,17 @@ import {
   COVERAGE_TOAST,
 } from '@/constants/coverageCopy';
 import { getCurrentPeriod, secondsToLunchStart, secondsToWorkEnd, secondsToWorkStart, parseHHmm, workedSecondsToday } from '@/lib/workTime';
-import { getNextHoliday, isTodayHoliday, getNextHolidayFromStored, getNextWorkdayStart, secondsFromMidnightToday } from '@/lib/holidays';
+import {
+  getNextHoliday,
+  isTodayHoliday,
+  getNextHolidayFromStored,
+  getNextWorkdayStart,
+  secondsFromMidnightToday,
+} from '@/lib/holidays';
 import { getRetirementTotalSeconds, formatRetirementFromSeconds } from '@/lib/retirement';
-import { pickOffworkButton, pickOvertimeButtonCopy, pickStopOvertimeCopy, pickOvertimeSettleCopy, OVERTIME_UNPAID_HINT, pickOvertimeEditSaveCopy, pickOvertimeEditDeleteCopy, getTodayBalanceCopy, getCaloriesCopy, pickSickLeaveShuangmoTitle, pickSickLeaveShuangmoFootnote } from '@/constants/copy';
-import type { RecordEntry, TimeConfig } from '@/types';
+import { pickOffworkButton, pickOvertimeButtonCopy, pickStopOvertimeCopy, pickOvertimeSettleCopy, OVERTIME_UNPAID_HINT, pickOvertimeEditSaveCopy, pickOvertimeEditDeleteCopy, getTodayBalanceCopy, getCaloriesCopy, pickSickLeaveShuangmoTitle, pickSickLeaveShuangmoFootnote, pickWeekendEarnedLabel } from '@/constants/copy';
+import { isNiumaWorkday, isDaySpreadEligibleMonFri, isPureWeekendVibe } from '@/lib/niumaSchedule';
+import type { RecordEntry, TimeConfig, NiumaConfig } from '@/types';
 
 const MOYU_CATS = ['toilet', 'bailan', 'meeting'];
 const YANGMAO_CATS = ['coffee', 'snack', 'drink', 'charge'];
@@ -94,6 +102,13 @@ export default function HomeScreen() {
   const [nextHoliday, setNextHoliday] = useState<{ name: string; daysLeft: number } | null>(null);
   const [todayIsHoliday, setTodayIsHoliday] = useState(false);
   const [todayIsPaidLeave, setTodayIsPaidLeave] = useState(false);
+  /** 今日按排班是否休息（原「周末」含义：不上班则 true，含 996 调休） */
+  const [todayIsWeekend, setTodayIsWeekend] = useState(false);
+  const [niumaConfig, setNiumaConfig] = useState<NiumaConfig>({
+    enabled: false,
+    mode: 'standard',
+    alternateBigWeekMonday: null,
+  });
   /** 今日日历标记：年假算薅、病假用养伤话术 */
   const [todayLeaveMark, setTodayLeaveMark] = useState<'annual_leave' | 'sick_leave' | null>(null);
   const [sickShuangmoTitle, setSickShuangmoTitle] = useState('');
@@ -140,6 +155,9 @@ export default function HomeScreen() {
   const retirementTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timeConfigRef = useRef<TimeConfig | null>(null);
   const holidayDatesRef = useRef<string[]>([]);
+  /** 日历请假 key→类型，用于「下一工作日」跳过年假/病假日 */
+  const leaveMarksRef = useRef<Record<string, string>>({});
+  const niumaConfigRef = useRef<NiumaConfig | null>(null);
   const offworkBtnScale = useRef(new Animated.Value(1)).current;
 
   const [paidOvertimeToday, setPaidOvertimeToday] = useState(0);
@@ -157,9 +175,13 @@ export default function HomeScreen() {
     const salaryConfig = await loadSalaryConfig();
     const personal = await loadPersonalConfig();
     const leaveMarks = await loadLeaveMarks();
+    const niuma = await loadNiumaConfig();
+    niumaConfigRef.current = niuma;
+    setNiumaConfig(niuma);
     const commuteMonthly = await getCommuteMonthlyBudget();
     const [holidayOn, holidayDates] = await Promise.all([getHolidaySyncEnabled(), loadHolidayDates()]);
     holidayDatesRef.current = holidayOn ? holidayDates : [];
+    leaveMarksRef.current = leaveMarks as Record<string, string>;
     const isHoliday = holidayOn && isTodayHoliday(holidayDates);
     setTodayIsHoliday(isHoliday);
 
@@ -175,15 +197,19 @@ export default function HomeScreen() {
     const todayStr = formatLocalDateKey(start);
     const lm = leaveMarks[todayStr];
     const hasCalendarLeave = lm === 'annual_leave' || lm === 'sick_leave';
-    const isWeekend = start.getDay() === 0 || start.getDay() === 6;
-    /** 有薪今日：法定休、年假/病假、或普通工作日（周末且无假无标记则 0） */
+    const workdayBySchedule = isNiumaWorkday(start, niuma);
+    const isOffSchedule = !workdayBySchedule;
+    setTodayIsWeekend(isOffSchedule);
+    /** 有薪今日：法定休、年假/病假、或排班上的工作日 */
     const daySalaryToday =
-      daySalary > 0 && (isHoliday || hasCalendarLeave || !isWeekend) ? daySalary : 0;
-    const isShuangmoDay = isHoliday || hasCalendarLeave;
+      daySalary > 0 && (isHoliday || hasCalendarLeave || workdayBySchedule) ? daySalary : 0;
+    /** 不上班日：法定假 / 年假病假 / 排班休息 */
+    const isShuangmoDay = isHoliday || hasCalendarLeave || isOffSchedule;
     const workSec = isShuangmoDay ? secondsFromMidnightToday() : workedSecondsToday(timeConfig);
     setWorkSecToday(workSec);
+    /** 按天摊仅法定休/带薪假；纯周末日薪为 0（月薪÷工作日，双休不计） */
     setEarnedByTimeToday(
-      isShuangmoDay ? daySalary * (workSec / (24 * 3600)) : workSec * salaryPerSecond
+      isShuangmoDay ? daySalaryToday * (workSec / (24 * 3600)) : workSec * salaryPerSecond
     );
     const paidOvertimeMonth = (await getRecordsInRange(
       new Date(start.getFullYear(), start.getMonth(), 1),
@@ -196,8 +222,8 @@ export default function HomeScreen() {
     const paidOvertimeToday = records.filter((r) => r.category === PAID_OVERTIME_CAT).reduce((a, r) => a + r.amount, 0);
     const moyuYangmaoToday = records.filter((r) => MOYU_CATS.includes(r.category) || YANGMAO_CATS.includes(r.category)).reduce((a, r) => a + r.amount, 0);
     const otherOutcomeToday = Math.abs(records.filter((r) => OUTCOME_OTHER.includes(r.category)).reduce((a, r) => a + r.amount, 0));
-    /** 法定休、年假/病假：不计日均通勤与今日通勤记录（在家休息） */
-    const isNonCommuteDay = isHoliday || hasCalendarLeave;
+    /** 法定休、年假/病假、排班休息：不计日均通勤与今日通勤记录 */
+    const isNonCommuteDay = isHoliday || hasCalendarLeave || isOffSchedule;
     const commuteDayBase = !isNonCommuteDay && commuteMonthly > 0 ? commuteMonthly / WORK_DAYS : 0;
     const todayCommuteSum = Math.abs(records.filter((r) => r.category === 'commute').reduce((a, r) => a + r.amount, 0));
     const mortgageConfig = await loadMortgageConfig();
@@ -351,12 +377,14 @@ export default function HomeScreen() {
     const tickSync = () => {
       const time = timeConfigRef.current;
       if (!time) return;
-      const shuangmo = todayIsHoliday || todayIsPaidLeave;
+      const shuangmo = todayIsHoliday || todayIsPaidLeave || todayIsWeekend;
       if (shuangmo) {
         const sec = secondsFromMidnightToday();
         const ds = daySalaryReport;
         setWorkSecToday(sec);
-        setEarnedByTimeToday(ds > 0 ? ds * (sec / (24 * 3600)) : 0);
+        const daySpreadEligible =
+          todayIsHoliday || todayIsPaidLeave || isDaySpreadEligibleMonFri(new Date());
+        setEarnedByTimeToday(daySpreadEligible && ds > 0 ? ds * (sec / (24 * 3600)) : 0);
         return;
       }
       const sec = workedSecondsToday(time);
@@ -371,34 +399,38 @@ export default function HomeScreen() {
     init();
     const id = setInterval(tickSync, 1000);
     return () => clearInterval(id);
-  }, [salaryPerSecond, todayIsHoliday, todayIsPaidLeave, daySalaryReport]);
+  }, [salaryPerSecond, todayIsHoliday, todayIsPaidLeave, todayIsWeekend, daySalaryReport]);
 
-  // 法定/带薪休日：爽摸倒计时 + 已爽摸时长 + 已薅多少钱（按秒更新）
+  // 法定假 / 带薪假 / 周末：爽摸倒计时 + 已爽摸时长 + 已薅多少钱（按秒更新）
   useEffect(() => {
-    if (!todayIsHoliday && !todayIsPaidLeave) return;
+    if (!todayIsHoliday && !todayIsPaidLeave && !todayIsWeekend) return;
     const time = timeConfigRef.current;
     const dates = holidayDatesRef.current;
     const tick = () => {
       if (!time) return;
-      const next = getNextWorkdayStart(time.workStart, dates);
+      const next = getNextWorkdayStart(time.workStart, dates, leaveMarksRef.current, niumaConfigRef.current ?? undefined);
       const sec = Math.max(0, Math.floor((next.getTime() - Date.now()) / 1000));
       setCountdownToWorkSec(sec);
       setShuangmoSecToday(secondsFromMidnightToday());
-      setShuangmoMoney(daySalaryReport * (secondsFromMidnightToday() / (24 * 3600)));
+      const spreadOk =
+        todayIsHoliday || todayIsPaidLeave || isDaySpreadEligibleMonFri(new Date());
+      setShuangmoMoney(
+        spreadOk && daySalaryReport > 0 ? daySalaryReport * (secondsFromMidnightToday() / (24 * 3600)) : 0
+      );
     };
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
-  }, [todayIsHoliday, todayIsPaidLeave, daySalaryReport]);
+  }, [todayIsHoliday, todayIsPaidLeave, todayIsWeekend, daySalaryReport]);
 
   useEffect(() => {
     const updateCountdown = async () => {
       const time = await loadTimeConfig();
       const enabled = time.lunchEnabled !== false;
       setLunchEnabled(enabled);
-      if (todayIsHoliday || todayIsPaidLeave) {
+      if (todayIsHoliday || todayIsPaidLeave || todayIsWeekend) {
         const dates = holidayDatesRef.current;
-        const next = getNextWorkdayStart(time.workStart, dates);
+        const next = getNextWorkdayStart(time.workStart, dates, leaveMarksRef.current, niumaConfigRef.current ?? undefined);
         const sec = Math.max(0, Math.floor((next.getTime() - Date.now()) / 1000));
         if (todayIsHoliday) {
           setPeriodLabel('今日法定休息');
@@ -406,6 +438,8 @@ export default function HomeScreen() {
           setPeriodLabel('今日病假 · 带薪回血');
         } else if (todayLeaveMark === 'annual_leave') {
           setPeriodLabel('今日年假 · 爽摸中');
+        } else if (todayIsWeekend) {
+          setPeriodLabel('今日周末 · 休息');
         } else {
           setPeriodLabel('今日休息');
         }
@@ -473,7 +507,7 @@ export default function HomeScreen() {
     return () => {
       if (tickRef.current) clearInterval(tickRef.current);
     };
-  }, [todayIsHoliday, todayIsPaidLeave, todayLeaveMark]);
+  }, [todayIsHoliday, todayIsPaidLeave, todayIsWeekend, todayLeaveMark]);
 
   useEffect(() => {
     retirementTickRef.current = setInterval(() => {
@@ -705,6 +739,14 @@ export default function HomeScreen() {
   const coverageEarned = (daySalaryEligible ? earnedByTimeToday : 0) + paidOvertimeToday;
   const coverageCovered = covTarget > 0 && coverageEarned >= covTarget;
 
+  /** 周六日且非法定假、无年假病假：不按日薪摊，状态卡用骚话+倒计时 */
+  const isPureWeekend =
+    todayIsWeekend &&
+    !todayIsHoliday &&
+    !todayIsPaidLeave &&
+    isPureWeekendVibe(new Date(), niumaConfig);
+  const weekendVibeLine = useMemo(() => pickWeekendEarnedLabel(), [todayDataKey]);
+
   return (
     <ScrollView
       style={styles.container}
@@ -729,18 +771,31 @@ export default function HomeScreen() {
         <View style={styles.statusRow}>
           <View style={styles.statusCol}>
             <Text style={styles.statusColLabel}>
-              {todayIsHoliday || todayIsPaidLeave ? '今日已薅（按天摊）' : '今日已赚'}
+              {isPureWeekend
+                ? weekendVibeLine
+                : todayIsHoliday || todayIsPaidLeave
+                  ? '今日已薅（按天摊）'
+                  : '今日已赚'}
             </Text>
-            <Text style={styles.statusColValue}>{formatMoney(earnedByTimeToday)}</Text>
-            <Text style={styles.statusColSmall}>日薪 {formatMoney(daySalaryReport)}</Text>
+            {isPureWeekend ? (
+              <>
+                <Text style={styles.statusColValue}>{formatCountdownSeconds(countdownToWorkSec)}</Text>
+                <Text style={styles.statusColSmall}>距下一工作日到点上班</Text>
+              </>
+            ) : (
+              <>
+                <Text style={styles.statusColValue}>{formatMoney(earnedByTimeToday)}</Text>
+                <Text style={styles.statusColSmall}>日薪 {formatMoney(daySalaryReport)}</Text>
+              </>
+            )}
           </View>
           <View style={styles.statusCol}>
             <Text style={styles.statusColLabel}>
-              {todayIsHoliday || todayIsPaidLeave ? '已爽摸时长' : '已上班时长'}
+              {todayIsHoliday || todayIsPaidLeave || todayIsWeekend ? '已爽摸时长' : '已上班时长'}
             </Text>
             <Text style={styles.statusColValue}>{formatDurationHHMMSS(workSecToday)}</Text>
             <Text style={styles.statusColSmall}>
-              {todayIsHoliday || todayIsPaidLeave ? '自 0 点起计时' : '有效工时'}
+              {todayIsHoliday || todayIsPaidLeave || todayIsWeekend ? '自 0 点起计时' : '有效工时'}
             </Text>
           </View>
         </View>
@@ -889,22 +944,28 @@ export default function HomeScreen() {
         </View>
       </View>
 
-      {(todayIsHoliday || todayIsPaidLeave) && (
+      {(todayIsHoliday || todayIsPaidLeave || todayIsWeekend) && (
         <View style={styles.shuangmoCard}>
           <Text style={styles.shuangmoTitle}>
             {todayLeaveMark === 'sick_leave' && sickShuangmoTitle
               ? sickShuangmoTitle
-              : '你还能爽摸的倒计时'}
+              : isPureWeekend
+                ? '周末愉快 · 下个班再说'
+                : '你还能爽摸的倒计时'}
           </Text>
-          <Text style={styles.shuangmoCountdown}>到下一个工作日上班 {formatCountdownSeconds(countdownToWorkSec)}</Text>
+          <Text style={styles.shuangmoCountdown}>
+            下一工作日到点上班 · 还有 {formatCountdownSeconds(countdownToWorkSec)}
+          </Text>
           <View style={styles.shuangmoRow}>
             <Text style={styles.shuangmoLabel}>已爽摸</Text>
             <Text style={styles.shuangmoValue}>{formatCountdownSeconds(shuangmoSecToday)}</Text>
           </View>
-          <View style={styles.shuangmoRow}>
-            <Text style={styles.shuangmoLabel}>{todayLeaveMark === 'sick_leave' ? '带薪回血' : '已薅'}</Text>
-            <Text style={styles.shuangmoValue}>{formatMoney(shuangmoMoney)}</Text>
-          </View>
+          {!isPureWeekend && (
+            <View style={styles.shuangmoRow}>
+              <Text style={styles.shuangmoLabel}>{todayLeaveMark === 'sick_leave' ? '带薪回血' : '已薅'}</Text>
+              <Text style={styles.shuangmoValue}>{formatMoney(shuangmoMoney)}</Text>
+            </View>
+          )}
           {todayLeaveMark === 'sick_leave' && sickShuangmoFootnote ? (
             <Text style={styles.shuangmoFootnote}>{sickShuangmoFootnote}</Text>
           ) : null}
